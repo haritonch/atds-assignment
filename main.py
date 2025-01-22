@@ -5,6 +5,7 @@ from query1 import *
 from query2 import *
 from query3 import *
 from query4 import *
+from query5 import *
 from load import *
 
 def main():
@@ -55,10 +56,13 @@ def main():
     # Q4
     print("Running query 4")
     re_codes_df = load_re_codes_df(spark_session)
-    query4(query3_result_df, crime_data_df, re_codes_df)
+    query4_result_df = query4(query3_result_df, crime_data_df, re_codes_df)
+    # query4_result_df[0].show()
     
     # Q5
-        
+    print("Running query 5")    
+    query5_result_df = query5(spark_session, crime_data_df)
+    query5_result_df.show()
 
 if __name__ == "__main__":
     main()
