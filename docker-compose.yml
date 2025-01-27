@@ -1,0 +1,45 @@
+services:
+  master:
+    image: spark:3.5.0
+    container_name: master
+    hostname: master
+    command: >
+      /bin/bash -c "
+      /opt/spark/sbin/start-master.sh -h master;
+      tail -f /opt/spark/logs/spark--org.apache.spark.deploy.master.Master-1-master.out;
+      "
+    volumes:
+      - ./data/:/home/data
+    ports:
+      - "8080:8080" # Web UI
+      - "7077:7077" # Spark
+
+  worker:
+    image: spark:3.5.0
+    depends_on:
+      - master
+    container_name: worker
+    hostname: worker
+    command: >
+      /bin/bash -c "
+      /opt/spark/sbin/start-worker.sh -h worker -p 7081 --webui-port 8081 spark://master:7077;
+      tail -f /opt/spark/logs/spark--org.apache.spark.deploy.worker.Worker-1-worker.out;
+      "
+    volumes:
+      - ./data/:/home/data
+    ports:
+      - "8081:8081" # Web UI
+      - "7081:7081" # Spark
+
+  jupyter:
+    build:
+      context: .
+      dockerfile: Dockerfile.jupyter
+    container_name: jupyter
+    hostname: jupyter
+    volumes:
+      - ./jupyter:/home/jovyan/work:rw
+      - ./data/:/home/data
+    ports: 
+      - "8888:8888"
+    command: "start-notebook.sh --NotebookApp.token= --ip=0.0.0.0"
