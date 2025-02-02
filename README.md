@@ -467,12 +467,7 @@ def query4(query3_result_df, crime_data_df, census_blocks_df, race_codes_df):
 ### Κώδικας
 
 ```python
-def run_query_5(spark_session, crime_df):
-    sedona = SedonaContext.create(spark_session)
-    police_stations_df = spark_session.read.csv(
-        "s3://initial-notebook-data-bucket-dblab-905418150721/LA_Police_Stations.csv",
-        header=True, inferSchema=True
-    )
+def query5(crime_df, police_stations_df):
     police_stations_df = police_stations_df.withColumn("station_geom", ST_Point("X", "Y"))
     crime_df = crime_df.filter((col("LAT").isNotNull()) & (col("LON").isNotNull()))
     crime_df = crime_df.withColumn("crime_geom", ST_Point("LON", "LAT"))

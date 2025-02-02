@@ -51,3 +51,8 @@ def load_re_codes_df(spark_session):
     return spark_session \
         .read \
         .csv("s3://initial-notebook-data-bucket-dblab-905418150721/RE_codes.csv", header=True, inferSchema=True)
+        
+def load_police_stations_df(spark_session):
+    return spark_session \
+        .read \
+        .csv("s3://initial-notebook-data-bucket-dblab-905418150721/LA_Police_Stations.csv", header=True, inferSchema=True)

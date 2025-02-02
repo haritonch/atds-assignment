@@ -4,11 +4,7 @@ from sedona.spark import ST_Point, ST_Distance
 from timed import timed
 
 @timed
-def query5(spark_session, crime_df):
-    police_stations_df = spark_session.read.csv(
-        "s3://initial-notebook-data-bucket-dblab-905418150721/LA_Police_Stations.csv",
-        header=True, inferSchema=True
-    )
+def query5(crime_df, police_stations_df):
     police_stations_df = police_stations_df.withColumn("station_geom", ST_Point("X", "Y"))
     crime_df = crime_df.filter((col("LAT").isNotNull()) & (col("LON").isNotNull()))
     crime_df = crime_df.withColumn("crime_geom", ST_Point("LON", "LAT"))
