@@ -1,5 +1,6 @@
 from pyspark import SparkConf, SparkContext
 from pyspark.sql import SparkSession
+from query5 import *
 
 # Initialize a shared SparkContext
 conf = SparkConf().setAppName("SharedSparkContext").setMaster("local[*]")
@@ -13,8 +14,6 @@ configs = [
 ]
 
 for config in configs:
-    log_progress(f"Starting with SparkSession: {config['app_name']}")
-    
     # Create a new SparkSession using the shared SparkContext and apply resource configurations
     spark_session = (
         SparkSession(sc)
@@ -33,8 +32,5 @@ for config in configs:
         header=True,
         inferSchema=True
     )
-    log_progress("/CrimeData loaded successfully.")
     
-    # Execute Query 5 with timing
-    query5_result_df, execution_time = run_query_5(spark_session, crime_df)
-    print(f"Query 5 execution time for {config['app_name']}: {execution_time:.2f} seconds")
+    query5_result_df = query5(spark_session, crime_df)

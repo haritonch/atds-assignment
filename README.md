@@ -335,30 +335,124 @@ def query3_with_strategies(
 ### Κώδικας
 
 ```python
-def query4(query3_result_df, crime_data_df, race_codes_df):
+@timed
+def query4(query3_result_df, crime_data_df, census_blocks_df, race_codes_df):
+    # Λήψη του SparkSession από το context του DataFrame
+    spark_session = crime_data_df.sql_ctx.sparkSession
+
+   
     top_3_areas = query3_result_df.orderBy(col("Income per capita").desc()).limit(3)
     bottom_3_areas = query3_result_df.orderBy(col("Income per capita").asc()).limit(3)
-    
-    top3_areas_crimes = crime_data_df.join(top_3_areas, "COMM")
-    bottom3_areas_crimes = crime_data_df.join(bottom_3_areas, "COMM")
-    
-    top3_areas_crimes_with_re_codes = top3_areas_crimes.join(race_codes_df, top3_areas_crimes["Vict Descent"] == race_codes_df["DescentCode"], "left")
-    bottom3_areas_crimes_with_re_codes = bottom3_areas_crimes.join(race_codes_df, bottom3_areas_crimes["Vict Descent"] == race_codes_df["DescentCode"], "left")
-    
-    top3_areas_crimes_with_re_codes.groupBy("Vict Descent Full").count()
-    bottom3_areas_crimes_with_re_codes.groupBy("Vict Descent Full").count()
-    
-    top3_areas_crimes_with_re_codes.show()
-    bottom3_areas_crimes_with_re_codes.show()
-    
-    return top3_areas_crimes_with_re_codes, bottom3_areas_crimes_with_re_codes
+
+    top_comms = [row.COMM for row in top_3_areas.select("COMM").collect()]
+    bottom_comms = [row.COMM for row in bottom_3_areas.select("COMM").collect()]
+
+    crime_data_with_geom = crime_data_df.withColumn("crime_geom", ST_Point("LON", "LAT"))
+
+    # Επιλογή μόνο των απαραίτητων στηλών από το census_blocks_df και broadcast
+    census_blocks_small = census_blocks_df.select("COMM", "geometry")
+    crimes_with_comm = crime_data_with_geom.join(
+        broadcast(census_blocks_small),
+        ST_Within(col("crime_geom"), col("geometry")),
+        "left"
+    ).cache()  # caching, καθώς θα χρησιμοποιηθεί για δύο φίλτρα
+
+    # Φιλτράρισμα εγκλημάτων για τις Top και Bottom κοινότητες
+    top_crimes = crimes_with_comm.filter(col("COMM").isin(top_comms))
+    bottom_crimes = crimes_with_comm.filter(col("COMM").isin(bottom_comms))
+
+    race_mapping = {row["Vict Descent"]: row["Vict Descent Full"] for row in race_codes_df.collect()}
+    broadcast_race_mapping = spark_session.sparkContext.broadcast(race_mapping)
+
+    def map_race(code):
+        return broadcast_race_mapping.value.get(code, None)
+    map_race_udf = udf(map_race, StringType())
+
+    top_crimes_with_race = top_crimes.withColumn("Vict Descent Full", map_race_udf(col("Vict Descent")))
+    bottom_crimes_with_race = bottom_crimes.withColumn("Vict Descent Full", map_race_udf(col("Vict Descent")))
+
+    top_grouped = top_crimes_with_race.groupBy("Vict Descent Full") \
+                                      .count() \
+                                      .orderBy(col("count").desc())
+    bottom_grouped = bottom_crimes_with_race.groupBy("Vict Descent Full") \
+                                            .count() \
+                                            .orderBy(col("count").desc())
+
+    print("Race profile για τις Top 3 Κοινότητες (ανάλογα με Income per capita):")
+    top_grouped.show()
+
+    print("Race profile για τις Bottom 3 Κοινότητες (ανάλογα με Income per capita):")
+    bottom_grouped.show()
+
+    return top_crimes_with_race, bottom_crimes_with_race
 ```
 
 ### Αποτελέσματα
-Out of resources
+
+#### Race profile για τις Top 3 Κοινότητες (ανάλογα με Income per capita):
+
+| Vict Descent Full          | count |
+|----------------------------|-------|
+| White                      | 8429  |
+| Other                      | 1125  |
+| Hispanic/Latin/Me...       | 868   |
+| NULL                       | 784   |
+| Unknown                    | 651   |
+| Black                      | 462   |
+| Other Asian                | 314   |
+| Chinese                    | 42    |
+| Japanese                   | 20    |
+| Filipino                   | 18    |
+| Korean                     | 18    |
+| American Indian/A...       | 7     |
+| AsianIndian                | 6     |
+| Vietnamese                 | 5     |
+| Hawaiian                   | 2     |
+
+---
+
+#### Race profile για τις Bottom 3 Κοινότητες (ανάλογα με Income per capita):
+
+| Vict Descent Full          | count |
+|----------------------------|-------|
+| Hispanic/Latin/Me...       | 47026 |
+| Black                      | 17151 |
+| NULL                       | 12453 |
+| White                      | 7265  |
+| Other                      | 3256  |
+| Unknown                    | 2865  |
+| Other Asian                | 1979  |
+| American Indian/A...       | 299   |
+| Chinese                    | 145   |
+| Korean                     | 103   |
+| Filipino                   | 56    |
+| Japanese                   | 27    |
+| Vietnamese                 | 23    |
+| AsianIndian                | 22    |
+| Hawaiian                   | 14    |
+| Pacific Islander           | 9     |
+| Cambodian                  | 8     |
+| Guamanian                  | 7     |
+| Laotian                    | 7     |
+| Samoan                     | 2     |
+
+---
+
+- `Q4_CONFIG_1`: 1 core / 2GB memory 77.3s
+- `Q4_CONFIG_2`: 2 cores / 4GB memory: 36s
+- `Q4_CONFIG_3`: 4 cores / 8GB memory: 31.8s
+
 
 ### Συμπεράσματα
-Out of resources
+- Παρατηρούμε ότι η αργή εκτέλεση οφείλεται κυρίως στην απουσία παράλληλης επεξεργασίας, η οποία καθιστά τα σταθερά overheads (πχ broadcasting, caching, UDF) πιο αισθητά.
+
+- Βάζοντας τουλάχιστον 2 πυρήνες βλέπουμε μεγάλη διαφορά, ενώ με πάνω από 2, η διαφορά είναι ναι μεν αισθητή αλλά όχι τόσο εμφανής.
+
+- Με τη χρήση ενός dictionary ως broadcast variable για τα race codes στέλνεται μία φορα σε κάθε executor και έχουμε γρήγορα lookups (πχ οταν χρησιμοποιούμε μια udf)
+
+- Χρήσιμο για μικρά datasets / dictionaries (race codes), μειώνει το data shuffling και εξασφαλίζει ότι είναι γρήγορα και εύκολα προσβάσιμα από τα worker nodes
+
+- Η χρήση cache διασφαλίζει οτί τα επόμενα operations δεν θα ξανάκανουν spatial join (ST_Within)
 
 ---
 
@@ -423,19 +517,16 @@ def run_query_5(spark_session, crime_df):
 | SOUTHEAST         | 0.02415012719550646  | 151999  |
 
 
-- `Q5_CONFIG_1`: 32.7662 sec
-- `Q5_CONFIG_2`: 26.7681 sec
-- `Q5_CONFIG_3`: 23.6621s sec
-
+- `Q5_CONFIG_1`: 2 executors × 4 cores / 8 GB memory: 32.7662 sec
+- `Q5_CONFIG_2`: 4 executors × 2 cores / 4 GB memory: 26.7681 sec
+- `Q5_CONFIG_3`: 8 executors × 1 core / 2 GB memory: 23.6621s sec
 
 ### Συμπεράσματα
 - **Parallelism**: Η αύξηση των executors μειώνει σημαντικά τον χρόνο εκτέλεσης, λόγω καλύτερης κατανομής του φόρτου εργασίας.
 - **Memory**: Μικρότερη μνήμη ανά executor δεν επηρεάζει την απόδοση, εφόσον τα δεδομένα χωρούν στους διαθέσιμους πόρους.
 - **Cores/Executors**: Περισσότεροι executors με λιγότερα cores οδήγησαν σε ταχύτερη επεξεργασία.
 
-> *Η παραλληλία είναι πιο σημαντική από την ισχύ κάθε εκτελεστή*
-
-**Καλύτερο Configuration**: Το `Q5_CONFIG_3` είναι το πιο αποδοτικό, με την καλύτερη ισορροπία παραλληλίας και πόρων.
+> *Ο παραλληλισμός είναι πιο σημαντικός από την ισχύ κάθε εκτελεστή*
 
 ### Benchmark Script
 
