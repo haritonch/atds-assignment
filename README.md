@@ -64,7 +64,7 @@ def query1_rdd(crime_data_df):
 |           <18| 15321|
 |           >64|  5676|
 
-Ο χρόνος εκτέλεσης με Dataframe API ήταν 1.5s ενώ με RDD ήταν 13.5s.
+Ο χρόνος εκτέλεσης με Dataframe API ήταν 10.0s ενώ με RDD ήταν 27.9s.
 
 ### Συμπεράσματα
 - Το DataFrame API είναι γενικά ταχύτερο λόγω του Catalyst Optimizer.
@@ -155,9 +155,9 @@ def query2_rdd(crime_data_df):
 |2010|    West LA| 0.04719512195121951| 19|
 |2010| Devonshire|0.024433793816370643| 20|
 
-- Xρόνος εκτέλεσης με RDD API: 12.5s
-- Χρόνος εκτέλεσης με SQL API: 1.4s
-- Τρέχοντας το ίδιο query φορτώνοντας το dataframe από ένα μόνο parquet file ο χρόνος εκτέλεσης με RDD API γίνεται 19.5s
+- Xρόνος εκτέλεσης με RDD API: 9.5s
+- Χρόνος εκτέλεσης με SQL API: 3.3s
+- Τρέχοντας το ίδιο query φορτώνοντας το dataframe από ένα μόνο parquet file ο χρόνος εκτέλεσης με RDD API γίνεται 46.3s
 
 
 ### Συμπεράσματα
@@ -261,7 +261,60 @@ def query3_with_strategies(
 ```
 
 ### Αποτελέσματα
-Δυστυχώς δεν έχουμε αποτελέσματα καθώς δεν προλάβαμε να τα σώσουμε πριν πέσει το σύστημα.
+Το αποτέλεσμα του query είναι: (20 πρώτες γραμμές)
+
+|               COMM| #Crimes per capita| Income per capita|
+|-------------------|-------------------|------------------|
+|  Pacific Palisades|0.45085501138400425| 70656.11282274863|
+|Palisades Highlands| 0.2055830941821028| 66867.43986433603|
+|   Marina Peninsula| 0.6124048881715471| 65235.69402813004|
+|            Bel Air| 0.4275511439293064| 63041.33809466166|
+|      Beverly Crest| 0.3713395127553113| 60947.49019768682|
+|          Brentwood| 0.5036005597078598|60840.624859219824|
+|  Mandeville Canyon|0.26229508196721313| 55572.10949582431|
+|        Playa Vista| 0.8157069235939951| 50264.47187990141|
+|            Carthay| 0.9322445879225219|49841.164527155335|
+|             Venice| 1.2549272030651342|47614.883340996166|
+|       Century City| 0.8558452481076535|46103.510597140456|
+|      Playa Del Rey| 0.7770740975300824|   45522.596580114|
+|        Studio City| 0.9295754238516157| 44049.85263005362|
+|    Hollywood Hills| 0.7937264742785446|43015.988205771646|
+|      South Carthay|  0.723174477360547|39831.340037649854|
+|   West Los Angeles| 0.8311722523049905| 39714.00529781941|
+|       Miracle Mile| 0.8820452139253908| 38834.84611073052|
+|        Rancho Park| 1.2552819698173154|38740.063860206516|
+|             Encino|  0.703747432052705| 38338.00564358072|
+|       Sherman Oaks| 0.7903687241383545|37767.445673661336|
+
+
+Και ο χρόνος εκτέλεσης ήταν 23.9s
+
+Οι χρόνοι εκτέλεσης σε συνάρτηση με τις στρατηγικές join φαίνονται στον παρακάτω πίνακα:
+
+| Community/Income Join strategy | Community income / Crime strategy | Execution Time (s) |
+|--------------------------------|-----------------------------------|--------------------|
+| BROADCAST                      | BROADCAST                         | crashes            |
+| BROADCAST                      | MERGE                             | 18.5               |
+| BROADCAST                      | SHUFFLE_HASH                      | 18.4               |
+| BROADCAST                      | SHUFFLE_REPLICATE_NL              | 41.4               |
+| MERGE                          | BROADCAST                         | crashes            |
+| MERGE                          | MERGE                             | 41.4               |
+| MERGE                          | SHUFFLE_HASH                      | 41.2               |
+| MERGE                          | SHUFFLE_REPLICATE_NL              | 40.5               |
+| SHUFFLE_HASH                   | BROADCAST                         | crashes            |
+| SHUFFLE_HASH                   | MERGE                             | 20.2               |
+| SHUFFLE_HASH                   | SHUFFLE_HASH                      | 37.4               |
+| SHUFFLE_HASH                   | SHUFFLE_REPLICATE_NL              | 37.3               |
+| SHUFFLE_REPLICATE_NL           | BROADCAST                         | crashes            |
+| SHUFFLE_REPLICATE_NL           | MERGE                             | 21.8               |
+| SHUFFLE_REPLICATE_NL           | SHUFFLE_HASH                      | 24.3               |
+| SHUFFLE_REPLICATE_NL           | SHUFFLE_REPLICATE_NL              | 18.2               |
+
+Είναι αναμενόμενο το πρόγραμμα να "σκάει" όταν χρησιμοποιούμε broadcast στρατηγική 
+για το δεύτερο join καθώς είναι μεγαλύτερο το crime dataframe και οι πόροι περιορίζονται από
+το aws. Έχουμε τις εξής παρατηρήσεις:
+- όταν η στρατηγική του πρώτου join είναι merge, τότε η επίδοση πέφτει. Αυτό γίνεται επειδή τα δεδομένα δεν είναι ταξινομημένα ως προς το join key ()
+- Για τους υπόλοιπους συνδυασμούς, οι χρόνοι εκτέλεσης είναι περίπου ομοιόμορφοι
 
 ### Αναμενόμενα Συμπεράσματα
 - **BROADCAST**: Ιδανικό για **μικρά** datasets.
